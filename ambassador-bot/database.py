@@ -18,6 +18,7 @@ class Application():
     archive_message_id : int
     frozen : bool = False
 
+print("Starting database...")
 connection = ZODB.connection(config.DATABASE_FILENAME)
 root = connection.root
 if not hasattr(root, "db"):

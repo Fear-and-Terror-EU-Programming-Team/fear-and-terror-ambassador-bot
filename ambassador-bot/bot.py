@@ -83,17 +83,15 @@ async def on_message(message):
     await bot.process_commands(message)
     transaction.commit()
 
-
 @bot.event
 async def on_raw_reaction_add(payload):
     rp = await unwrap_payload(payload)
     if rp.member == bot.user:
-        return  # ignore bot reactions
+        return # ignore bot reactions
     await handle_react(rp)
 
-
 # TODO do we even need?
-# async def on_raw_reaction_remove(payload):
+#async def on_raw_reaction_remove(payload):
 #    rp = await unwrap_payload(payload)
 #    if is_admin(rp.member):
 #        await handle_react(rp)
@@ -108,7 +106,7 @@ async def handle_react(rp):
         return
     # call appropriate handler
     success = await emoji_handlers[rp.channel.id][str(rp.emoji)](rp)
-    if success == False:  # note that `None` is intentionally treated as True
+    if success == False: # note that `None` is intentionally treated as True
         await rp.message.remove_reaction(rp.emoji, rp.member)
     transaction.commit()
 
@@ -117,15 +115,15 @@ async def handle_react(rp):
 async def register_application(message):
     print(message.content.encode())
     await message.channel.send(f"{message.author.mention} "
-                               f"Thanks for applying to Fear and Terror. "
-                               f"You now have the chance to edit your application before sending "
-                               f"it to our review team. "
-                               f"Once you're done, click the {emojis.COMMIT_APPLICATION} emoji. "
-                               f"If you want to retract your application and delete your "
-                               f"message, click the {emojis.DELETE_APPLICATION} emoji."
-                               f"\n\n"
-                               f"Otherwise, your application will be sent off automatically in "
-                               f"{config.AUTOCOMMIT_DELAY_MINUTES} minutes.")
+            f"Thanks for applying to Fear and Terror. "
+            f"You now have the chance to edit your application before sending "
+            f"it to our review team. "
+            f"Once you're done, click the {emojis.COMMIT_APPLICATION} emoji. "
+            f"If you want to retract your application and delete your "
+            f"message, click the {emojis.DELETE_APPLICATION} emoji."
+            f"\n\n"
+            f"Otherwise, your application will be sent off automatically in "
+            f"{config.AUTOCOMMIT_DELAY_MINUTES} minutes.")
     await message.add_reaction(emojis.COMMIT_APPLICATION)
     await message.add_reaction(emojis.DELETE_APPLICATION)
     # TODO schedule commit
@@ -133,15 +131,16 @@ async def register_application(message):
 
 
 @emoji_handler(emoji=emojis.COMMIT_APPLICATION,
-               channel_id=config.APPLICATION_CHANNEL)
+        channel_id=config.APPLICATION_CHANNEL)
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def commit_application(rp):
     applicant = rp.message.author
     ambassador_role = rp.guild.get_role(config.AMBASSADOR_ROLE)
 
+
     app_content = rp.message.content
-    app_content = app_content.replace("```", "")  # strip code block formatting
+    app_content = app_content.replace("```", "") # strip code block formatting
     voting_content = (f"{ambassador_role.mention}\n{applicant.mention}\n"
                       f"```{app_content}```")
     archive_content = (f"{applicant.mention}\n"
@@ -162,7 +161,7 @@ async def commit_application(rp):
 
 
 @emoji_handler(emoji=emojis.DELETE_APPLICATION,
-               channel_id=config.APPLICATION_CHANNEL)
+        channel_id=config.APPLICATION_CHANNEL)
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def delete_application(rp):
@@ -170,11 +169,12 @@ async def delete_application(rp):
 
 
 @emoji_handler(emoji=emojis.UPVOTE,
-               channel_id=config.VOTING_CHANNEL)
+        channel_id=config.VOTING_CHANNEL)
 @emoji_handler(emoji=emojis.DOWNVOTE,
-               channel_id=config.VOTING_CHANNEL)
+        channel_id=config.VOTING_CHANNEL)
 @restrict_to_channel(config.VOTING_CHANNEL)
 async def handle_vote(rp):
+
     upvotes, downvotes = count_votes(rp.message)
 
     # -1 so we don't count bot's reaction as vote
@@ -185,9 +185,9 @@ async def handle_vote(rp):
         app = db.applications[rp.message.id]
         applicant = rp.guild.get_member(app.applicant_id)
         archive_message = \
-            await archive_channel.fetch_message(app.archive_message_id)
+                await archive_channel.fetch_message(app.archive_message_id)
         voting_message = \
-            await voting_channel.fetch_message(app.voting_message_id)
+                await voting_channel.fetch_message(app.voting_message_id)
 
         del db.applications[rp.message.id]
 
@@ -199,9 +199,9 @@ async def handle_vote(rp):
         applicant_role = rp.guild.get_role(config.APPLICANT_ROLE)
         await applicant.add_roles(applicant_role)
         await applicant_talk_channel.send(f"{applicant.mention} "
-                                          f"Congratulations, your application has been accepted! "
-                                          f"Please check {applicant_info_channel.mention} to find out "
-                                          f"how to proceed.")
+                f"Congratulations, your application has been accepted! "
+                f"Please check {applicant_info_channel.mention} to find out "
+                f"how to proceed.")
 
         # TODO add applicants to some kind of DB
 
@@ -217,19 +217,20 @@ async def handle_vote(rp):
         await archive_message.add_reaction(emojis.ARCHIVE_DENIED)
         try:
             await applicant.send(f"Hey {applicant.mention}, thank you for "
-                                 f"applying to Fear and Terror. "
-                                 f"Unfortunately, your application has been denied. "
-                                 # TODO specific date/time
-                                 f"Feel free to re-apply in two weeks.\n\n"
-                                 f"We don't collect statements from the individual voters but "
-                                 f"the most common reasons for denying an application are "
-                                 f"a perceived lack of effort or being underage. "
-                                 f"If you decide to re-apply, make sure to give thorough "
-                                 f"responses to all the questions so we know you're serious "
-                                 f"about joining FaT.")
+                f"applying to Fear and Terror. "
+                f"Unfortunately, your application has been denied. "
+                # TODO specific date/time
+                f"Feel free to re-apply in two weeks.\n\n"
+                f"We don't collect statements from the individual voters but "
+                f"the most common reasons for denying an application are "
+                f"a perceived lack of effort or being underage. "
+                f"If you decide to re-apply, make sure to give thorough "
+                f"responses to all the questions so we know you're serious "
+                f"about joining FaT.")
         except discord.errors.Forbidden:
             await ambassador_channel.send(f"{ambassador_manager.mention}, "
-                                          f"{applicant.mention} failed to receive denied DM.")
+                        f"{applicant.mention} did not receive the denied DM. "
+                        f"He probably has the ambassador bot blocked.")
 
 
 def count_votes(message):

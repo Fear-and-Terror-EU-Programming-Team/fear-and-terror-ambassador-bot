@@ -7,6 +7,7 @@ jobstores = {
         url='sqlite:///' + config.SCHEDULER_DB_FILENAME)
 }
 
+print("Starting scheduler...")
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 scheduler.start()
 

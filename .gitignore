@@ -205,4 +205,4 @@ config.py
 database-old.json
 database.json
 *.fs*
-
+*.sqlite
