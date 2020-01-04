@@ -38,7 +38,7 @@ class Draft(persistent.Persistent):
 
         # schedule autocommit
         job_id = scheduling.delayed_execute(Application.create, [draft],
-                timedelta(seconds=config.AUTOCOMMIT_DELAY_MINUTES)) # TODO minutes
+                timedelta(minutes=config.AUTOCOMMIT_DELAY_MINUTES))
         draft.commit_job_id = job_id
 
         return draft
@@ -101,7 +101,7 @@ class Application(persistent.Persistent):
 
         # schedule automatic vote-clos
         job_id = scheduling.delayed_execute(app.check_votes, [True],
-                timedelta(seconds=config.AUTO_VOTE_CLOSE_HOURS)) # TODO hours
+                timedelta(hours=config.AUTO_VOTE_CLOSE_HOURS))
         app.vote_close_job_id = job_id
 
         return app
@@ -180,7 +180,7 @@ class Application(persistent.Persistent):
 
         # add as declined user to DB
         cur_time = datetime.now(config.TIMEZONE)
-        delta = timedelta(seconds=config.REAPPLY_COOLDOWN_DAYS) # TODO days
+        delta = timedelta(days=config.REAPPLY_COOLDOWN_DAYS)
         reapply_time = cur_time + delta
         pu = ProcessedUser(applicant.id, cur_time, False, reapply_time)
         assert applicant.id not in db.denied

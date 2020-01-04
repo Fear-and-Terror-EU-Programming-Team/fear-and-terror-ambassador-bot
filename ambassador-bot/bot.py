@@ -85,6 +85,7 @@ async def on_message(message):
     await bot.process_commands(message)
     transaction.commit()
 
+
 @bot.event
 async def on_raw_reaction_add(payload):
     rp = await unwrap_payload(payload)
@@ -92,13 +93,6 @@ async def on_raw_reaction_add(payload):
         return # ignore bot reactions
     await handle_react(rp)
 
-# TODO do we even need?
-#async def on_raw_reaction_remove(payload):
-#    rp = await unwrap_payload(payload)
-#    if is_admin(rp.member):
-#        await handle_react(rp)
-#    else:
-#        await rp.message.remove_reaction(rp.emoji, rp.member)
 
 @synchronized
 async def handle_react(rp):
@@ -115,8 +109,10 @@ async def handle_react(rp):
 
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 async def register_application(message):
-    print(message.content.encode()) # TODO remove
-    # TODO ignore for admins
+    # ignore admin messages
+    if is_admin(message.author):
+        return
+
     if db.is_app_blocked(message.author):
         info_msg = await message.channel.send(f"{message.author.mention} "
                 f"You are currently not allowed to apply to Fear and Terror. "
