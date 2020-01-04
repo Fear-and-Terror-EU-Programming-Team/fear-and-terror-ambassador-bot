@@ -6,6 +6,7 @@ import emojis
 import functools
 import scheduling
 import transaction
+import discord.utils as utils
 from application import Draft, Application
 from discord.ext import commands
 from database import db
@@ -109,6 +110,22 @@ async def on_raw_reaction_add(payload):
     if rp.member == bot.user:
         return # ignore bot reactions
     await handle_react(rp)
+
+
+@bot.command()
+@restrict_to_channel(config.AMBASSADOR_CHANNEL)
+async def introduction(ctx):
+    voice_channel = bot.get_channel(config.AMBASSADOR_VOICE_CHANNEL)
+    applicant_role = ctx.guild.get_role(config.APPLICANT_ROLE)
+    recruit_role = ctx.guild.get_role(config.RECRUIT_ROLE)
+    for m in voice_channel.members:
+        if applicant_role in m.roles:
+            await m.add_roles(recruit_role)
+            await m.send(f"Steam Group: https://steamcommunity.com/groups/FearandTerror \n"
+                         f"Community Trailer: https://www.youtube.com/watch?v=kYrxBjMiRG4 \n"
+                         f"FaT Gaming Backgrounds: https://imgur.com/a/4didOBv")
+            await m.remove_roles(applicant_role)
+            # TODO Remove them from applicant database.
 
 
 @synchronized
