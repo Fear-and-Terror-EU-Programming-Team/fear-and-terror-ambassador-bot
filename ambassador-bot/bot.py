@@ -6,9 +6,11 @@ import emojis
 import functools
 import scheduling
 import transaction
+from application import Draft, Application
 from discord.ext import commands
-from discord.utils import get
-from database import db, Application
+from database import db
+from datetime import datetime
+from synchronization import synchronized
 
 bot = commands.Bot(command_prefix=config.BOT_CMD_PREFIX)
 
@@ -55,24 +57,24 @@ def restrict_to_author_and_admins(func):
     return wrapper
 
 
+def restrict_to_ambassador_manager(func):
+    @functools.wraps(func)
+    async def wrapper(rp, *args, **kwargs):
+        if rp.member.id != config.AMBASSADOR_MANAGER:
+            return False
+
+        return await func(rp, *args, **kwargs)
+
+    return wrapper
+
 @bot.event
 async def on_ready():
     print('Logged in as')
     print(bot.user.name)
     print(bot.user.id)
     print('------')
-    global voting_channel
-    voting_channel = bot.get_channel(config.VOTING_CHANNEL)
-    global archive_channel
-    archive_channel = bot.get_channel(config.ARCHIVE_CHANNEL)
-    global ambassador_channel
-    ambassador_channel = bot.get_channel(config.AMBASSADOR_CHANNEL)
-    global applicant_talk_channel
-    applicant_talk_channel = bot.get_channel(config.APPLICANT_TALK_CHANNEL)
-    global applicant_info_channel
-    applicant_info_channel = bot.get_channel(config.APPLICANT_INFO_CHANNEL)
-    global ambassador_manager
-    ambassador_manager = bot.get_user(config.AMBASSADOR_MANAGER)
+    config.init_config(bot)
+    scheduling.init_scheduler()
 
 
 @bot.event
@@ -98,7 +100,7 @@ async def on_raw_reaction_add(payload):
 #    else:
 #        await rp.message.remove_reaction(rp.emoji, rp.member)
 
-
+@synchronized
 async def handle_react(rp):
     if rp.channel.id not in emoji_handlers or \
             str(rp.emoji) not in emoji_handlers[rp.channel.id]:
@@ -113,21 +115,34 @@ async def handle_react(rp):
 
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 async def register_application(message):
-    print(message.content.encode())
-    await message.channel.send(f"{message.author.mention} "
-            f"Thanks for applying to Fear and Terror. "
-            f"You now have the chance to edit your application before sending "
-            f"it to our review team. "
-            f"Once you're done, click the {emojis.COMMIT_APPLICATION} emoji. "
-            f"If you want to retract your application and delete your "
-            f"message, click the {emojis.DELETE_APPLICATION} emoji."
-            f"\n\n"
-            f"Otherwise, your application will be sent off automatically in "
-            f"{config.AUTOCOMMIT_DELAY_MINUTES} minutes.")
-    await message.add_reaction(emojis.COMMIT_APPLICATION)
-    await message.add_reaction(emojis.DELETE_APPLICATION)
-    # TODO schedule commit
-    # TODO schedule info message delete
+    print(message.content.encode()) # TODO remove
+    # TODO ignore for admins
+    if db.is_app_blocked(message.author):
+        info_msg = await message.channel.send(f"{message.author.mention} "
+                f"You are currently not allowed to apply to Fear and Terror. "
+                f"Possible reasons:\n"
+                f"- You're already a member of FaT\n"
+                f"- You already have an active application\n"
+                f"- Your last application was denied less than two weeks ago\n"
+                f"\n"
+                f"Your application and this message will be deleted in "
+                f"{config.DEFAULT_MESSAGE_DELETE_DELAY} seconds.")
+        scheduling.message_delayed_delete(message)
+        scheduling.message_delayed_delete(info_msg)
+        return
+
+    if len(message.content) > 1900:
+        info_msg = await message.channel.send(f"{message.author.mention} "
+                f"Your application is too long. "
+                f"Please try to use a maximum of 1900 characters."
+                f"\n\n"
+                f"Your application and this message will be deleted in "
+                f"{config.DEFAULT_MESSAGE_DELETE_DELAY} seconds.")
+        scheduling.message_delayed_delete(message)
+        scheduling.message_delayed_delete(info_msg)
+        return
+
+    await Draft.create(message)
 
 
 @emoji_handler(emoji=emojis.COMMIT_APPLICATION,
@@ -135,29 +150,11 @@ async def register_application(message):
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def commit_application(rp):
-    applicant = rp.message.author
-    ambassador_role = rp.guild.get_role(config.AMBASSADOR_ROLE)
-
-
-    app_content = rp.message.content
-    app_content = app_content.replace("```", "") # strip code block formatting
-    voting_content = (f"{ambassador_role.mention}\n{applicant.mention}\n"
-                      f"```{app_content}```")
-    archive_content = (f"{applicant.mention}\n"
-                       f"```{app_content}```")
-
-    # Re-post message in voting and archive channel
-    voting_message = await voting_channel.send(voting_content)
-    archive_message = await archive_channel.send(archive_content)
-
-    await voting_message.add_reaction(emojis.UPVOTE)
-    await voting_message.add_reaction(emojis.DOWNVOTE)
-
-    app = Application(applicant.id, voting_message.id, archive_message.id)
-    db.applications[voting_message.id] = app
-
-    await rp.channel.send(f"Application from "
-                          f"{rp.message.author.mention} committed.")
+    draft = db.drafts[rp.message.id]
+    # deschedule auto-commit
+    # Yes, there is a race condition here. I don't care.
+    scheduling.deschedule(draft.commit_job_id)
+    await Application.create(draft)
 
 
 @emoji_handler(emoji=emojis.DELETE_APPLICATION,
@@ -165,7 +162,11 @@ async def commit_application(rp):
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def delete_application(rp):
-    await rp.message.delete()
+    draft = db.drafts[rp.message.id]
+    # deschedule auto-commit
+    # Yes, there is a race condition here. I don't care.
+    scheduling.deschedule(draft.commit_job_id)
+    await draft.delete()
 
 
 @emoji_handler(emoji=emojis.UPVOTE,
@@ -174,75 +175,35 @@ async def delete_application(rp):
         channel_id=config.VOTING_CHANNEL)
 @restrict_to_channel(config.VOTING_CHANNEL)
 async def handle_vote(rp):
-
-    upvotes, downvotes = count_votes(rp.message)
-
-    # -1 so we don't count bot's reaction as vote
-    accepted = upvotes - 1 >= config.APPROVE_THRESHOLD
-    denied = downvotes - 1 >= config.DECLINE_THRESHOLD
-
-    if accepted or denied:
-        app = db.applications[rp.message.id]
-        applicant = rp.guild.get_member(app.applicant_id)
-        archive_message = \
-                await archive_channel.fetch_message(app.archive_message_id)
-        voting_message = \
-                await voting_channel.fetch_message(app.voting_message_id)
-
-        del db.applications[rp.message.id]
-
-    if accepted:
-        await voting_message.edit(f"{emojis.ARCHIVE_ACCEPTED} Application "
-                                  f"has been accepted!")
-        scheduling.message_delayed_delete(voting_message)
-        await archive_message.add_reaction(emojis.ARCHIVE_ACCEPTED)
-        applicant_role = rp.guild.get_role(config.APPLICANT_ROLE)
-        await applicant.add_roles(applicant_role)
-        await applicant_talk_channel.send(f"{applicant.mention} "
-                f"Congratulations, your application has been accepted! "
-                f"Please check {applicant_info_channel.mention} to find out "
-                f"how to proceed.")
-
-        # TODO add applicants to some kind of DB
-
-    if denied:
-        await voting_message.edit(f"{emojis.ARCHIVE_DENIED} Application "
-                                  f"has been denied!")
-        scheduling.message_delayed_delete(voting_message)
-
-        # "Message Plague" TODO change? clarify requirements
-        await ambassador_channel.send(f"{ambassador_manager.mention} "
-                                      f"Denied {applicant.mention}")
-
-        await archive_message.add_reaction(emojis.ARCHIVE_DENIED)
-        try:
-            await applicant.send(f"Hey {applicant.mention}, thank you for "
-                f"applying to Fear and Terror. "
-                f"Unfortunately, your application has been denied. "
-                # TODO specific date/time
-                f"Feel free to re-apply in two weeks.\n\n"
-                f"We don't collect statements from the individual voters but "
-                f"the most common reasons for denying an application are "
-                f"a perceived lack of effort or being underage. "
-                f"If you decide to re-apply, make sure to give thorough "
-                f"responses to all the questions so we know you're serious "
-                f"about joining FaT.")
-        except discord.errors.Forbidden:
-            await ambassador_channel.send(f"{ambassador_manager.mention}, "
-                        f"{applicant.mention} did not receive the denied DM. "
-                        f"He probably has the ambassador bot blocked.")
+    app = db.applications[rp.message.id]
+    await app.check_votes()
 
 
-def count_votes(message):
-    upvotes = 0
-    downvotes = 0
-    for r in message.reactions:
-        if str(r.emoji) == emojis.UPVOTE:
-            upvotes = r.count
-        elif str(r.emoji) == emojis.DOWNVOTE:
-            downvotes = r.count
+@emoji_handler(emoji=emojis.FREEZE_APPLICATION,
+        channel_id=config.VOTING_CHANNEL)
+@restrict_to_channel(config.VOTING_CHANNEL)
+@restrict_to_ambassador_manager
+async def freeze_vote(rp):
+    app = db.applications[rp.message.id]
+    await app.freeze()
 
-    return (upvotes, downvotes)
+
+@emoji_handler(emoji=emojis.FORCE_ACCEPT,
+        channel_id=config.VOTING_CHANNEL)
+@restrict_to_channel(config.VOTING_CHANNEL)
+@restrict_to_ambassador_manager
+async def force_accept(rp):
+    app = db.applications[rp.message.id]
+    await app.accept()
+
+
+@emoji_handler(emoji=emojis.FORCE_DECLINE,
+        channel_id=config.VOTING_CHANNEL)
+@restrict_to_channel(config.VOTING_CHANNEL)
+@restrict_to_ambassador_manager
+async def force_decline(rp):
+    app = db.applications[rp.message.id]
+    await app.decline()
 
 
 async def unwrap_payload(payload):
