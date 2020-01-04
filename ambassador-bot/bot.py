@@ -19,6 +19,8 @@ emoji_handlers = {}
 
 
 def emoji_handler(emoji, channel_id):
+    '''Decorator for emoji handlers.'''
+
     # looks weird. is weird. blame python.
     def decorator(func):
         global emoji_handlers
@@ -32,6 +34,11 @@ def emoji_handler(emoji, channel_id):
 
 
 def restrict_to_channel(channel_id):
+    '''Decorator restricting a bot function to the specified channel.
+
+    The functions first argument is assumed to have a `channel` field.
+    This is (among others) the case with InvocationContext and Message.'''
+
     # welcom to mai java tutorial, tudai we learn how to werite boilarplaed cod
     def decorator(func):
         @functools.wraps(func)
@@ -47,6 +54,11 @@ def restrict_to_channel(channel_id):
 
 
 def restrict_to_author_and_admins(func):
+    '''Decorator restricting an emoji function
+    to the message author and admins.
+
+    Will make the function immediately return `False` otherwise.'''
+
     @functools.wraps(func)
     async def wrapper(rp, *args, **kwargs):
         if not is_admin(rp.member) and rp.message.author.id != rp.member.id:
@@ -58,6 +70,11 @@ def restrict_to_author_and_admins(func):
 
 
 def restrict_to_ambassador_manager(func):
+    '''Decorator restricting an emoji function
+    to the ambassador admin.
+
+    Will make the function immediately return `False` otherwise.'''
+
     @functools.wraps(func)
     async def wrapper(rp, *args, **kwargs):
         if rp.member.id != config.AMBASSADOR_MANAGER:
@@ -96,6 +113,12 @@ async def on_raw_reaction_add(payload):
 
 @synchronized
 async def handle_react(rp):
+    '''Executes the correct emoji handler
+    for the specified `ReactionPayload`.
+
+    If no appropriate emoji handler exists or the emoji handler returns
+    `False`, then the emoji reaction is removed.'''
+
     if rp.channel.id not in emoji_handlers or \
             str(rp.emoji) not in emoji_handlers[rp.channel.id]:
         await rp.message.remove_reaction(rp.emoji, rp.member)
@@ -109,6 +132,15 @@ async def handle_react(rp):
 
 @restrict_to_channel(config.APPLICATION_CHANNEL)
 async def register_application(message):
+    '''Turns the posted message into an application draft if the user is
+    allowed to apply.
+
+    Otherwise, posts an info message and schedules deletion of the posted
+    message and the info message.
+
+    Will completely ignore messages from admins (see `config.BOT_ADMIN_ROLES`).
+    '''
+
     # ignore admin messages
     if is_admin(message.author):
         return
@@ -143,7 +175,6 @@ async def register_application(message):
 
 @emoji_handler(emoji=emojis.COMMIT_APPLICATION,
         channel_id=config.APPLICATION_CHANNEL)
-@restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def commit_application(rp):
     draft = db.drafts[rp.message.id]
@@ -155,7 +186,6 @@ async def commit_application(rp):
 
 @emoji_handler(emoji=emojis.DELETE_APPLICATION,
         channel_id=config.APPLICATION_CHANNEL)
-@restrict_to_channel(config.APPLICATION_CHANNEL)
 @restrict_to_author_and_admins
 async def delete_application(rp):
     draft = db.drafts[rp.message.id]
@@ -169,7 +199,6 @@ async def delete_application(rp):
         channel_id=config.VOTING_CHANNEL)
 @emoji_handler(emoji=emojis.DOWNVOTE,
         channel_id=config.VOTING_CHANNEL)
-@restrict_to_channel(config.VOTING_CHANNEL)
 async def handle_vote(rp):
     app = db.applications[rp.message.id]
     await app.check_votes()
@@ -177,7 +206,6 @@ async def handle_vote(rp):
 
 @emoji_handler(emoji=emojis.FREEZE_APPLICATION,
         channel_id=config.VOTING_CHANNEL)
-@restrict_to_channel(config.VOTING_CHANNEL)
 @restrict_to_ambassador_manager
 async def freeze_vote(rp):
     app = db.applications[rp.message.id]
@@ -186,7 +214,6 @@ async def freeze_vote(rp):
 
 @emoji_handler(emoji=emojis.FORCE_ACCEPT,
         channel_id=config.VOTING_CHANNEL)
-@restrict_to_channel(config.VOTING_CHANNEL)
 @restrict_to_ambassador_manager
 async def force_accept(rp):
     app = db.applications[rp.message.id]
@@ -195,7 +222,6 @@ async def force_accept(rp):
 
 @emoji_handler(emoji=emojis.FORCE_DECLINE,
         channel_id=config.VOTING_CHANNEL)
-@restrict_to_channel(config.VOTING_CHANNEL)
 @restrict_to_ambassador_manager
 async def force_decline(rp):
     app = db.applications[rp.message.id]

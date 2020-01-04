@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 
 @dataclass
 class Draft(persistent.Persistent):
+    '''Represents an application draft that has to be committed
+    before it can be voted on.'''
 
     applicant_id : int
     draft_message_id : int
@@ -59,6 +61,7 @@ class Draft(persistent.Persistent):
 
 @dataclass
 class Application(persistent.Persistent):
+    '''Represents a committed application that can be voted on.'''
 
     applicant_id : int
     voting_message_id : int
@@ -67,8 +70,11 @@ class Application(persistent.Persistent):
     vote_close_job_id : str = None
 
     async def create(draft):
-        '''Commits a draft, copying it to
-        the voting and archive channel.'''
+        '''Commits a draft, turning it into an application.
+
+        This will also copy it to the voting and archive channel and will
+        delete the draft and the corresponding info message.'''
+
         draft_message = await config.application_channel \
                 .fetch_message(draft.draft_message_id)
         applicant = draft_message.author
@@ -99,7 +105,7 @@ class Application(persistent.Persistent):
         app = Application(applicant.id, voting_message.id, archive_message.id)
         db.applications[voting_message.id] = app
 
-        # schedule automatic vote-clos
+        # schedule automatic vote-close
         job_id = scheduling.delayed_execute(app.check_votes, [True],
                 timedelta(hours=config.AUTO_VOTE_CLOSE_HOURS))
         app.vote_close_job_id = job_id
@@ -107,6 +113,17 @@ class Application(persistent.Persistent):
         return app
 
     async def check_votes(self, force_close=False):
+        '''Checks whether the application has been accepted or declined and
+        calls `self.accept` or `self.decline` if necessary.
+
+        If `force_close` is `False` and neither `config.APPROVE_THRESHOLD` nor
+        `config.DECLINE_THRESHOLD` has been reached, no action is taken.
+
+        If `force_close` is `True`, the application is accepted if it has
+        strictly more upvotes than downvotes.
+        Otherwise, it is declined.
+        '''
+
         voting_message = await config.voting_channel.fetch_message(
                 self.voting_message_id)
         upvotes, downvotes = _count_votes(voting_message)
@@ -131,6 +148,15 @@ class Application(persistent.Persistent):
             await self.decline()
 
     async def accept(self):
+        '''Accepts the application.
+
+        This will
+        - update the post in `config.ARCHIVE_CHANNEL`
+        - add the `config.APPLICANT_ROLE`
+        - make a post in `config.APPLICANT_TALK_CHANNEL`
+        - delete the application from `config.VOTING_CHANNEL`
+        - add a `ProcessedUser` to the database
+        '''
         applicant = config.archive_channel.guild.get_member(self.applicant_id)
         archive_message = await config.archive_channel.fetch_message(
                 self.archive_message_id)
@@ -158,6 +184,15 @@ class Application(persistent.Persistent):
         db.accepted[applicant.id] = pu
 
     async def decline(self):
+        '''Declines the application.
+
+        This will
+        - update the post in `config.ARCHIVE_CHANNEL`
+        - notify the ambassador manager in `config.AMBASSADOR_CHANNEL`
+        - delete the application from `config.VOTING_CHANNEL`
+        - add a `ProcessedUser` to the database
+        - DM the applicant
+        '''
         applicant = config.archive_channel.guild.get_member(self.applicant_id)
         archive_message = await config.archive_channel.fetch_message(
                 self.archive_message_id)
@@ -208,6 +243,13 @@ class Application(persistent.Persistent):
                         f"He probably has the ambassador bot blocked.")
 
     async def freeze(self):
+        '''Freezes the application.
+
+        This will
+        - prevent the vote auto-close
+        - give the `config.AMBASSADOR_MANAGER` the option to force accept or
+        deny the applicant
+        '''
         # deschedule vote auto-close
         scheduling.deschedule(self.vote_close_job_id)
         self.vote_close_job_id = None
@@ -226,6 +268,10 @@ class Application(persistent.Persistent):
 
 @dataclass
 class ProcessedUser(persistent.Persistent):
+    '''Holds info on users that went through the voting process.
+    Currently only used to block users from applying too soon after
+    being denied.'''
+
     user_id : int
     processed_datetime : datetime
     accepted : bool = True
